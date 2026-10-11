@@ -4,6 +4,7 @@ import { BookingCommand } from "./booking/command";
 import { BookingModel } from "./booking/model";
 import { BookingQuery } from "./booking/query";
 import { EarningsModel } from "./entertainer/model";
+import { EntertainerQuery } from "./entertainer/query";
 import { MemoryEventBase } from "./eventbase";
 import { RecordModels, SubscribeModels } from "./events";
 import { VenueQuery } from "./venue/query";
@@ -30,6 +31,7 @@ stack
   )
   .mountProcessor("Booking Query", "/bookings", BookingQuery(bookingModel))
   .mountProcessor("Venue Query", "/venues", VenueQuery(bookingModel))
+  .mountProcessor("Entertainer Query", "/entertainers", EntertainerQuery(earningsModel))
   .registerPostInitFn(() => {
     console.log("Booking ledger is up. Try:");
     console.log(
