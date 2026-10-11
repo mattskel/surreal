@@ -1,5 +1,6 @@
 import ShimmieTestStack from "shimmiestack/shimmieteststack";
 import { EarningsModel } from "../src/entertainer/model";
+import { EntertainerQuery } from "../src/entertainer/query";
 import {
   BookingConfirmedEvent,
   PaymentRecordedEvent,
@@ -12,6 +13,7 @@ const meta = { userAgent: "test", user: "tester", date: 0 };
 function makeStack() {
   const stack = ShimmieTestStack<RecordModels, SubscribeModels>();
   const earningsModel = EarningsModel(stack);
+  stack.mountTest(EntertainerQuery(earningsModel), "/entertainers");
 
   const confirm = (booking: Partial<BookingConfirmedEvent> & { bookingId: string }) =>
     stack.recordUncheckedEvent({
@@ -37,7 +39,7 @@ function makeStack() {
       meta,
     });
 
-  return { earningsModel, confirm, cancel, pay };
+  return { stack, earningsModel, confirm, cancel, pay };
 }
 
 const aBooking: BookingConfirmedEvent = {
@@ -206,5 +208,35 @@ describe("the earnings model", () => {
       aPayment("pay-1", "b-1", 10000),
     );
     expect(earningsModel.getPayment("pay-2")).toBeUndefined();
+  });
+});
+
+describe("the entertainer earnings query", () => {
+  it("should return the earnings summary for an entertainer", async () => {
+    const { stack, confirm, pay } = makeStack();
+    await confirm({ bookingId: "b-1" });
+    await pay(aPayment("pay-1", "b-1", 10000));
+
+    const fetched = await stack.testGet({
+      path: "/entertainers/ent-1/earnings",
+      expectedResponseCode: 200,
+    });
+    expect(fetched.body).toMatchObject({
+      entertainerId: "ent-1",
+      totalPaidCents: 10000,
+      totalOutstandingCents: 35000,
+    });
+    expect(fetched.body.bookings).toHaveLength(1);
+  });
+
+  it("should return an empty summary for an unknown entertainer", async () => {
+    const { stack } = makeStack();
+
+    const fetched = await stack.testGet({
+      path: "/entertainers/ent-unknown/earnings",
+      expectedResponseCode: 200,
+    });
+    expect(fetched.body.totalPaidCents).toBe(0);
+    expect(fetched.body.bookings).toEqual([]);
   });
 });
