@@ -1,10 +1,27 @@
 import ShimmieTestStack from "shimmiestack/shimmieteststack";
+import { BookingCommand } from "../src/booking/command";
+import { BookingModel } from "../src/booking/model";
+import { EarningsModel } from "../src/entertainer/model";
 import { PaymentRecordedEvent, RecordModels, SubscribeModels } from "../src/events";
 
 function makeStack() {
   const stack = ShimmieTestStack<RecordModels, SubscribeModels>();
-  return { stack };
+  const bookingModel = BookingModel(stack);
+  const earningsModel = EarningsModel(stack);
+  stack.mountTest(
+    BookingCommand(stack, bookingModel, earningsModel),
+    "/bookings",
+  );
+  return { stack, bookingModel, earningsModel };
 }
+
+const aBooking = {
+  venueId: "the-espy",
+  entertainerId: "ent-1",
+  entertainerName: "The Amplifiers",
+  feeCents: 45000,
+  startsAt: "2030-01-10T20:00:00.000Z",
+};
 
 const aPayment: PaymentRecordedEvent = {
   paymentId: "pay-1",
@@ -84,5 +101,158 @@ describe("the payment recorded event", () => {
       });
     };
     expect(neverCalled).toBeDefined();
+  });
+});
+
+const aPaymentBody = {
+  paymentId: "pay-1",
+  amountCents: 10000,
+  paidAt: "2026-01-01T10:00:00.000Z",
+};
+
+describe("recording a payment", () => {
+  it("should record the payment against the booking", async () => {
+    const { stack, earningsModel } = makeStack();
+
+    const created = await stack.testPost({
+      path: "/bookings",
+      body: aBooking,
+      expectedResponseCode: 201,
+    });
+    const { bookingId } = created.body;
+
+    const recorded = await stack.testPost({
+      path: `/bookings/${bookingId}/payments`,
+      body: aPaymentBody,
+      expectedResponseCode: 201,
+    });
+    expect(recorded.body.paymentId).toBe("pay-1");
+
+    expect(earningsModel.getPayment("pay-1")).toEqual({
+      ...aPaymentBody,
+      bookingId,
+    });
+  });
+
+  it("should accept several partial payments for one booking", async () => {
+    const { stack, earningsModel } = makeStack();
+
+    const created = await stack.testPost({
+      path: "/bookings",
+      body: aBooking,
+      expectedResponseCode: 201,
+    });
+    const { bookingId } = created.body;
+
+    for (const paymentId of ["pay-deposit", "pay-balance"]) {
+      await stack.testPost({
+        path: `/bookings/${bookingId}/payments`,
+        body: { ...aPaymentBody, paymentId },
+        expectedResponseCode: 201,
+      });
+    }
+
+    expect(earningsModel.getEarningsForEntertainer("ent-1").totalPaidCents).toBe(
+      20000,
+    );
+  });
+
+  it("should accept a payment for a cancelled booking", async () => {
+    const { stack, earningsModel } = makeStack();
+
+    const created = await stack.testPost({
+      path: "/bookings",
+      body: aBooking,
+      expectedResponseCode: 201,
+    });
+    const { bookingId } = created.body;
+    await stack.testPost({
+      path: `/bookings/${bookingId}/cancel`,
+      body: { reason: "venue double-booked" },
+      expectedResponseCode: 200,
+    });
+
+    await stack.testPost({
+      path: `/bookings/${bookingId}/payments`,
+      body: aPaymentBody,
+      expectedResponseCode: 201,
+    });
+
+    expect(
+      earningsModel.getEarningsForEntertainer("ent-1").totalPaidOnCancelledCents,
+    ).toBe(10000);
+  });
+
+  it("should return 404 for a booking that does not exist", async () => {
+    const { stack, earningsModel } = makeStack();
+
+    await stack.testPost({
+      path: "/bookings/not-a-real-booking/payments",
+      body: aPaymentBody,
+      expectedResponseCode: 404,
+    });
+    expect(earningsModel.getPayment("pay-1")).toBeUndefined();
+  });
+
+  it.each([
+    ["a missing paymentId", { paymentId: undefined }],
+    ["a missing amount", { amountCents: undefined }],
+    ["a zero amount", { amountCents: 0 }],
+    ["a negative amount", { amountCents: -100 }],
+    ["a fractional amount", { amountCents: 100.5 }],
+    ["a string amount", { amountCents: "100" }],
+    ["a missing paidAt", { paidAt: undefined }],
+    ["an invalid paidAt", { paidAt: "not-a-date" }],
+    ["a future paidAt", { paidAt: "2999-01-01T00:00:00.000Z" }],
+  ])("should return 400 for %s", async (_, override) => {
+    const { stack, earningsModel } = makeStack();
+
+    const created = await stack.testPost({
+      path: "/bookings",
+      body: aBooking,
+      expectedResponseCode: 201,
+    });
+    const { bookingId } = created.body;
+
+    await stack.testPost({
+      path: `/bookings/${bookingId}/payments`,
+      body: { ...aPaymentBody, ...override },
+      expectedResponseCode: 400,
+    });
+    expect(earningsModel.getEarningsForEntertainer("ent-1").totalPaidCents).toBe(
+      0,
+    );
+  });
+
+  it("should return 409 and not record again when a paymentId already exists", async () => {
+    const { stack, earningsModel } = makeStack();
+
+    const created = await stack.testPost({
+      path: "/bookings",
+      body: aBooking,
+      expectedResponseCode: 201,
+    });
+    const { bookingId } = created.body;
+
+    await stack.testPost({
+      path: `/bookings/${bookingId}/payments`,
+      body: aPaymentBody,
+      expectedResponseCode: 201,
+    });
+    await stack.testPost({
+      path: `/bookings/${bookingId}/payments`,
+      body: aPaymentBody,
+      expectedResponseCode: 409,
+    });
+    await stack.testPost({
+      path: `/bookings/${bookingId}/payments`,
+      body: { ...aPaymentBody, amountCents: 99999 },
+      expectedResponseCode: 409,
+    });
+
+    expect(stack.recordUncheckedEvent).toHaveBeenCalledTimes(2);
+    expect(earningsModel.getEarningsForEntertainer("ent-1").totalPaidCents).toBe(
+      10000,
+    );
   });
 });

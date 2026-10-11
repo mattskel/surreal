@@ -3,6 +3,7 @@ import { noAuthorization } from "shimmiestack/authorizers";
 import { BookingCommand } from "./booking/command";
 import { BookingModel } from "./booking/model";
 import { BookingQuery } from "./booking/query";
+import { EarningsModel } from "./entertainer/model";
 import { MemoryEventBase } from "./eventbase";
 import { RecordModels, SubscribeModels } from "./events";
 import { VenueQuery } from "./venue/query";
@@ -18,13 +19,14 @@ const stack = ShimmieStack<RecordModels, SubscribeModels>(
 );
 
 const bookingModel = BookingModel(stack);
+const earningsModel = EarningsModel(stack);
 
 stack
   .setApiVersion("/v1")
   .mountProcessor(
     "Booking Command",
     "/bookings",
-    BookingCommand(stack, bookingModel),
+    BookingCommand(stack, bookingModel, earningsModel),
   )
   .mountProcessor("Booking Query", "/bookings", BookingQuery(bookingModel))
   .mountProcessor("Venue Query", "/venues", VenueQuery(bookingModel))
