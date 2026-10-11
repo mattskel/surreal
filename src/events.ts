@@ -26,12 +26,21 @@ export interface BookingCancelledEvent {
   reason: string;
 }
 
+export interface PaymentRecordedEvent {
+  paymentId: string;
+  bookingId: string;
+  amountCents: number;
+  paidAt: string;
+}
+
 export type RecordModels = {
   BOOKING_CONFIRMED_EVENT: BookingConfirmedEvent;
   BOOKING_CANCELLED_EVENT: BookingCancelledEvent;
+  PAYMENT_RECORDED_EVENT: PaymentRecordedEvent;
 };
 
 export type SubscribeModels = {
   BOOKING_CONFIRMED_EVENT: BookingConfirmedEvent;
   BOOKING_CANCELLED_EVENT: BookingCancelledEvent;
+  PAYMENT_RECORDED_EVENT: PaymentRecordedEvent;
 };
